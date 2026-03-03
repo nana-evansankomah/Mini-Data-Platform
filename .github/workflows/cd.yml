@@ -1,0 +1,39 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env from secrets
+        run: |
+          echo "POSTGRES_DB=dataplatform"                                     > .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"                  >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"          >> .env
+          echo "ETL_WRITER_PASSWORD=${{ secrets.ETL_WRITER_PASSWORD }}"      >> .env
+          echo "BI_READER_PASSWORD=${{ secrets.BI_READER_PASSWORD }}"        >> .env
+          echo "MINIO_ROOT_USER=${{ secrets.MINIO_ROOT_USER }}"             >> .env
+          echo "MINIO_ROOT_PASSWORD=${{ secrets.MINIO_ROOT_PASSWORD }}"     >> .env
+          echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.FERNET_KEY }}"        >> .env
+          echo "AIRFLOW__WEBSERVER__SECRET_KEY=${{ secrets.WEBSERVER_SECRET }}" >> .env
+          echo "AIRFLOW_ADMIN_PASSWORD=${{ secrets.AIRFLOW_ADMIN_PASSWORD }}" >> .env
+
+      - name: Deploy containers
+        run: |
+          docker compose pull
+          docker compose up -d --build --remove-orphans
+          docker compose ps
+
+      - name: Health check
+        run: |
+          sleep 30
+          curl -f http://localhost:8080/health || exit 1
+          curl -f http://localhost:9000/minio/health/live || exit 1
+          curl -f http://localhost:3000/api/health || exit 1
+          echo "All services healthy"
