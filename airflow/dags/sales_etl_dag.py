@@ -14,8 +14,11 @@ Flow: discover → process_files (concurrent per file:
 import sys
 import os
 import time
+import csv
+import random
+import tempfile
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from airflow import DAG
@@ -33,11 +36,38 @@ from etl.file_mover import move_to_processed, move_to_quarantine
 from etl.exceptions import ETLError
 from utils.logger import get_logger, log_context
 from utils.pg_client import close_pool
+from utils.minio_client import get_minio_client, minio_operation
 
 logger = get_logger("sales_etl_dag")
 
 # ── Concurrency config ───────────────────────────────────────
 MAX_CONCURRENT_FILES = int(os.getenv("ETL_MAX_WORKERS", "4"))
+AUTO_GENERATE_ENABLED = os.getenv("ETL_AUTO_GENERATE", "true").lower() in {"1", "true", "yes", "on"}
+AUTO_GENERATE_ROWS = int(os.getenv("ETL_AUTO_GENERATE_ROWS", "50"))
+AUTO_GENERATE_INVALID_ROWS = int(os.getenv("ETL_AUTO_GENERATE_INVALID_ROWS", "0"))
+LANDING_BUCKET = "landing"
+LANDING_PREFIX = "sales/"
+
+REGIONS = [
+    "North America",
+    "Europe",
+    "Asia Pacific",
+    "Latin America",
+    "Middle East & Africa",
+]
+
+PRODUCTS = [
+    "Widget Pro",
+    "Gadget X",
+    "ThingaMajig 3000",
+    "Super Connector",
+    "Data Cable Premium",
+    "Cloud Storage Box",
+    "Smart Sensor Kit",
+    "Power Adapter Plus",
+    "Wireless Hub",
+    "Mega Battery Pack",
+]
 
 
 # ── Airflow callbacks ────────────────────────────────────────
@@ -360,6 +390,109 @@ def _cleanup(**context):
         logger.warning("Cleanup error (non-fatal): %s", str(e))
 
 
+def _generate_valid_row(order_num: int) -> dict:
+    """Generate one valid sales row."""
+    order_date = date.today() - timedelta(days=random.randint(0, 365))
+    return {
+        "order_id": f"ORD-{order_num}",
+        "order_date": order_date.isoformat(),
+        "customer_id": f"CUST-{random.randint(100000, 999999)}",
+        "region": random.choice(REGIONS),
+        "product": random.choice(PRODUCTS),
+        "quantity": random.randint(1, 500),
+        "unit_price": round(random.uniform(5.00, 999.99), 2),
+    }
+
+
+def _generate_invalid_row(order_num: int) -> dict:
+    """Generate one invalid row to exercise quarantine behavior."""
+    error_type = random.choice(["bad_id", "future_date", "bad_region", "neg_qty", "zero_price"])
+    row = _generate_valid_row(order_num)
+    if error_type == "bad_id":
+        row["order_id"] = str(random.randint(10000, 99999))
+    elif error_type == "future_date":
+        row["order_date"] = "2030-12-31"
+    elif error_type == "bad_region":
+        row["region"] = "Antarctica"
+    elif error_type == "neg_qty":
+        row["quantity"] = -random.randint(1, 100)
+    elif error_type == "zero_price":
+        row["unit_price"] = 0.00
+    return row
+
+
+def _generate_sample_data(**context):
+    """
+    Generate a CSV file for this DAG run.
+
+    Returns the local file path via XCom.
+    """
+    if not AUTO_GENERATE_ENABLED:
+        logger.info("Auto-generation disabled (ETL_AUTO_GENERATE=false); skipping sample file generation")
+        return None
+
+    rows = max(AUTO_GENERATE_ROWS, 0)
+    invalid_rows = max(AUTO_GENERATE_INVALID_ROWS, 0)
+    if rows == 0 and invalid_rows == 0:
+        logger.info("Auto-generation configured with 0 rows; skipping sample file generation")
+        return None
+    fieldnames = ["order_id", "order_date", "customer_id", "region", "product", "quantity", "unit_price"]
+
+    run_id = context.get("run_id", "manual__run").replace(":", "_")
+    run_id = run_id.replace("+", "_").replace("-", "_")
+    filename = f"sample_sales_{run_id}.csv"
+    file_path = os.path.join(tempfile.gettempdir(), filename)
+
+    # Keep identifiers in 7-10 digits to satisfy the data contract.
+    start_id = random.randint(5_000_000, 9_000_000)
+    records = [_generate_valid_row(start_id + i) for i in range(rows)]
+    records.extend(_generate_invalid_row(start_id + rows + i) for i in range(invalid_rows))
+    random.shuffle(records)
+
+    with open(file_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(records)
+
+    logger.info(
+        "Generated sample file: %s (%d valid + %d invalid rows)",
+        file_path, rows, invalid_rows,
+    )
+    return file_path
+
+
+def _upload_sample_data(**context):
+    """
+    Upload generated sample CSV to landing/sales/ in MinIO.
+
+    Returns the uploaded object key via XCom.
+    """
+    ti = context["ti"]
+    file_path = ti.xcom_pull(task_ids="generate_sample_data")
+    if not file_path:
+        logger.info("No generated sample file to upload; skipping upload task")
+        return None
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Generated sample file not found: {file_path}")
+
+    object_name = f"{LANDING_PREFIX}{os.path.basename(file_path)}"
+    client = get_minio_client()
+
+    if not minio_operation(client.bucket_exists, LANDING_BUCKET):
+        minio_operation(client.make_bucket, LANDING_BUCKET)
+
+    minio_operation(client.fput_object, LANDING_BUCKET, object_name, file_path)
+    logger.info("Uploaded sample file to s3://%s/%s", LANDING_BUCKET, object_name)
+
+    try:
+        os.remove(file_path)
+    except OSError as exc:
+        logger.warning("Could not remove temp sample file %s: %s", file_path, str(exc))
+
+    return object_name
+
+
 # ── DAG definition ────────────────────────────────────────────
 with DAG(
     dag_id="sales_etl",
@@ -373,6 +506,17 @@ with DAG(
     on_success_callback=_on_success,
     sla_miss_callback=_sla_miss,
 ) as dag:
+    generate = PythonOperator(
+        task_id="generate_sample_data",
+        python_callable=_generate_sample_data,
+        provide_context=True,
+    )
+
+    upload = PythonOperator(
+        task_id="upload_sample_data",
+        python_callable=_upload_sample_data,
+        provide_context=True,
+    )
 
     discover = ShortCircuitOperator(
         task_id="discover_files",
@@ -394,4 +538,4 @@ with DAG(
         trigger_rule="all_done",  # Always runs, even if process fails
     )
 
-    discover >> process >> cleanup
+    generate >> upload >> discover >> process >> cleanup

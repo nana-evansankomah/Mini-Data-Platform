@@ -53,7 +53,21 @@ If any host ports are already occupied, override them in `.env`:
 `POSTGRES_HOST_PORT`, `MINIO_API_PORT`, `MINIO_CONSOLE_PORT`,
 `AIRFLOW_HOST_PORT`, `METABASE_HOST_PORT`.
 
-### 3. Generate & Upload Sample Data
+### 3. Ingestion (Now Automated in DAG)
+
+The `sales_etl` DAG now runs ingestion as explicit steps before processing:
+1. `generate_sample_data`
+2. `upload_sample_data`
+3. `discover_files`
+4. `process_files`
+5. `cleanup`
+
+By default, auto-generation is enabled (`ETL_AUTO_GENERATE=true`) and runs on each DAG schedule.
+You can tune generated volume with:
+- `ETL_AUTO_GENERATE_ROWS` (default `50`)
+- `ETL_AUTO_GENERATE_INVALID_ROWS` (default `0`)
+
+If you want to upload your own CSV manually (optional), you can still run:
 
 ```bash
 pip install minio
