@@ -2,7 +2,6 @@
 Unit tests for transform.py — Data cleaning and transformation.
 """
 import pandas as pd
-from datetime import date
 from etl.transform import transform_dataframe
 
 

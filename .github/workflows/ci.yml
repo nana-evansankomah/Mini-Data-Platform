@@ -66,7 +66,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install minio psycopg2-binary
+      - run: pip install minio psycopg2-binary requests
       - run: cp .env.example .env
       - run: docker compose up -d
       - name: Wait for services
@@ -75,8 +75,56 @@ jobs:
         run: |
           python scripts/generate_sample_data.py --rows 20 --output /tmp/test_sales.csv
           python scripts/upload_to_minio.py --file /tmp/test_sales.csv
-      - name: Wait for DAG to process
-        run: sleep 120
+      - name: Trigger and wait for DAG
+        run: |
+          python -c "
+          import os
+          import time
+          import requests
+
+          airflow_url = os.getenv('AIRFLOW_URL', 'http://localhost:8080')
+          auth = (os.getenv('AIRFLOW_USER', 'admin'), os.getenv('AIRFLOW_PASS', 'changeme'))
+          dag_id = 'sales_etl'
+
+          for _ in range(30):
+              try:
+                  health = requests.get(f'{airflow_url}/health', timeout=10)
+                  if health.ok:
+                      break
+              except requests.RequestException:
+                  pass
+              time.sleep(5)
+          else:
+              raise RuntimeError('Airflow did not become healthy in time')
+
+          trigger = requests.post(
+              f'{airflow_url}/api/v1/dags/{dag_id}/dagRuns',
+              auth=auth,
+              json={'conf': {}},
+              timeout=30,
+          )
+          trigger.raise_for_status()
+          run_id = trigger.json()['dag_run_id']
+          print(f'Triggered DAG run: {run_id}')
+
+          deadline = time.time() + 600
+          while time.time() < deadline:
+              status = requests.get(
+                  f'{airflow_url}/api/v1/dags/{dag_id}/dagRuns/{run_id}',
+                  auth=auth,
+                  timeout=30,
+              )
+              status.raise_for_status()
+              state = status.json()['state']
+              print(f'DAG state: {state}')
+              if state == 'success':
+                  break
+              if state == 'failed':
+                  raise RuntimeError(f'DAG run failed with state: {state}')
+              time.sleep(10)
+          else:
+              raise TimeoutError('DAG run did not complete within 10 minutes')
+          "
       - name: Validate data flow
         run: |
           python -c "

@@ -384,6 +384,7 @@ with DAG(
         task_id="process_files",
         python_callable=_process_files,
         provide_context=True,
+        retries=0,
     )
 
     cleanup = PythonOperator(

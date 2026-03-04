@@ -9,6 +9,7 @@ Includes:
 """
 import io
 import json
+import logging
 from datetime import datetime, timezone
 from minio.error import S3Error
 from minio.commonconfig import CopySource
@@ -29,7 +30,7 @@ ERRORS_BUCKET = "errors"
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def move_to_processed(file_key: str):
@@ -94,7 +95,7 @@ def move_to_processed(file_key: str):
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def move_to_quarantine(file_key: str, run_id: str, errors: list[dict]):

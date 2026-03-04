@@ -1,6 +1,7 @@
 """
 MinIO client helper — wraps connection setup with retry logic and logging.
 """
+import logging
 import os
 from minio import Minio
 from minio.error import S3Error
@@ -31,7 +32,7 @@ def get_minio_client() -> Minio:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def minio_operation(func, *args, **kwargs):

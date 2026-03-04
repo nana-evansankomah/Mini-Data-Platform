@@ -3,7 +3,7 @@ PostgreSQL connection helper — connection pooling, retry, and logging.
 """
 import os
 import threading
-import psycopg2
+import logging
 from psycopg2 import pool, OperationalError, InterfaceError
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from utils.logger import get_logger
@@ -45,7 +45,7 @@ def _init_pool():
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def get_pg_connection():

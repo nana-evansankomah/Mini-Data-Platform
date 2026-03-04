@@ -1,9 +1,6 @@
 """
 Unit tests for validate.py — Pandera schema validation.
 """
-import pytest
-import pandas as pd
-from datetime import date, timedelta
 from etl.validate import validate_dataframe
 
 

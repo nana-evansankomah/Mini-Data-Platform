@@ -40,7 +40,8 @@ PG_DSN = os.getenv(
 VALID_ROWS = 5
 INVALID_ROWS = 2
 DAG_ID = "sales_etl"
-POLL_TIMEOUT = 180  # seconds
+POLL_TIMEOUT = 600  # seconds
+HEALTH_TIMEOUT = 180  # seconds
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -89,6 +90,24 @@ def trigger_dag(dag_id: str) -> str:
     return resp.json()["dag_run_id"]
 
 
+def wait_for_airflow(timeout: int):
+    """Wait until Airflow API health endpoint responds successfully."""
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            resp = requests.get(
+                f"{AIRFLOW_URL}/health",
+                auth=(AIRFLOW_USER, AIRFLOW_PASS),
+                timeout=10,
+            )
+            if resp.ok:
+                return
+        except requests.RequestException:
+            pass
+        time.sleep(5)
+    raise TimeoutError(f"Airflow did not become healthy within {timeout}s")
+
+
 def wait_for_dag(dag_id: str, run_id: str, timeout: int):
     """Poll until DAG run completes or timeout."""
     start = time.time()
@@ -116,54 +135,62 @@ class TestEndToEnd:
         # 1. Generate test CSV
         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
             csv_path = f.name
-        generate_test_csv(csv_path, VALID_ROWS, INVALID_ROWS)
 
-        # 2. Upload to MinIO
-        minio_client = Minio(
-            MINIO_ENDPOINT, access_key=MINIO_ACCESS,
-            secret_key=MINIO_SECRET, secure=False,
-        )
-        filename = os.path.basename(csv_path)
-        object_name = f"sales/{filename}"
-        minio_client.fput_object("landing", object_name, csv_path)
+        try:
+            generate_test_csv(csv_path, VALID_ROWS, INVALID_ROWS)
 
-        # 3. Trigger DAG
-        run_id = trigger_dag(DAG_ID)
+            # 2. Upload to MinIO
+            minio_client = Minio(
+                MINIO_ENDPOINT, access_key=MINIO_ACCESS,
+                secret_key=MINIO_SECRET, secure=False,
+            )
+            filename = os.path.basename(csv_path)
+            object_name = f"sales/{filename}"
+            minio_client.fput_object("landing", object_name, csv_path)
 
-        # 4. Wait for completion
-        state = wait_for_dag(DAG_ID, run_id, POLL_TIMEOUT)
-        assert state == "success", f"DAG run ended with state: {state}"
+            # 3. Ensure Airflow is ready before triggering
+            wait_for_airflow(HEALTH_TIMEOUT)
+            run_id = trigger_dag(DAG_ID)
 
-        # 5. Assert PostgreSQL data
-        conn = psycopg2.connect(PG_DSN)
-        cur = conn.cursor()
+            # 4. Wait for completion
+            state = wait_for_dag(DAG_ID, run_id, POLL_TIMEOUT)
+            assert state == "success", f"DAG run ended with state: {state}"
 
-        # Check fact table
-        cur.execute(
-            "SELECT COUNT(*) FROM curated.fact_orders WHERE order_id LIKE 'ORD-0900%%'"
-        )
-        fact_count = cur.fetchone()[0]
-        assert fact_count == VALID_ROWS, f"Expected {VALID_ROWS} rows, got {fact_count}"
+            # 5. Assert PostgreSQL data
+            conn = psycopg2.connect(PG_DSN)
+            cur = conn.cursor()
 
-        # Check audit table
-        cur.execute(
-            "SELECT status, rows_in, rows_valid, rows_loaded "
-            "FROM audit.etl_audit_runs ORDER BY started_at DESC LIMIT 1"
-        )
-        audit_row = cur.fetchone()
-        assert audit_row[0] == "SUCCESS"
-        assert audit_row[1] == VALID_ROWS + INVALID_ROWS
-        assert audit_row[2] == VALID_ROWS
-        assert audit_row[3] == VALID_ROWS
+            # Check fact table
+            cur.execute(
+                "SELECT COUNT(*) FROM curated.fact_orders WHERE source_file = %s",
+                (object_name,),
+            )
+            fact_count = cur.fetchone()[0]
+            assert fact_count == VALID_ROWS, f"Expected {VALID_ROWS} rows, got {fact_count}"
 
-        conn.close()
+            # Check audit table
+            cur.execute(
+                "SELECT status, rows_in, rows_valid, rows_loaded "
+                "FROM audit.etl_audit_runs "
+                "WHERE dag_run_id = %s AND file_key = %s "
+                "ORDER BY started_at DESC LIMIT 1",
+                (run_id, object_name),
+            )
+            audit_row = cur.fetchone()
+            assert audit_row is not None, "Expected an audit row for the uploaded file"
+            assert audit_row[0] == "SUCCESS"
+            assert audit_row[1] == VALID_ROWS + INVALID_ROWS
+            assert audit_row[2] == VALID_ROWS
+            assert audit_row[3] == VALID_ROWS
 
-        # 6. Assert file moved from landing
-        remaining = list(
-            minio_client.list_objects("landing", prefix="sales/", recursive=True)
-        )
-        landing_files = [o.object_name for o in remaining if filename in o.object_name]
-        assert len(landing_files) == 0, "File should have been moved from landing/"
+            conn.close()
 
-        # Cleanup
-        os.unlink(csv_path)
+            # 6. Assert file moved from landing
+            remaining = list(
+                minio_client.list_objects("landing", prefix="sales/", recursive=True)
+            )
+            landing_files = [o.object_name for o in remaining if filename in o.object_name]
+            assert len(landing_files) == 0, "File should have been moved from landing/"
+        finally:
+            if os.path.exists(csv_path):
+                os.unlink(csv_path)

@@ -7,6 +7,7 @@ Includes:
 - ExtractionError for classified failures
 """
 import io
+import logging
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from minio.error import S3Error
@@ -24,7 +25,7 @@ LANDING_PREFIX = "sales/"
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def discover_files() -> list[str]:
@@ -71,7 +72,7 @@ def discover_files() -> list[str]:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def download_csv(file_key: str) -> pd.DataFrame:

@@ -7,6 +7,7 @@ Includes:
 - Structured logging with run metrics
 - AuditError for classified failures
 """
+import logging
 import uuid
 from datetime import datetime, timezone
 from psycopg2 import OperationalError
@@ -22,7 +23,7 @@ logger = get_logger(__name__)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def create_audit_run(dag_run_id: str, file_key: str) -> str:
@@ -70,7 +71,7 @@ def create_audit_run(dag_run_id: str, file_key: str) -> str:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def complete_audit_run(

@@ -49,6 +49,10 @@ Wait ~60 seconds for all services to initialize, then verify:
 | Metabase | http://localhost:3000 |
 | PostgreSQL | `localhost:5432` (connect via psql or DBeaver) |
 
+If any host ports are already occupied, override them in `.env`:
+`POSTGRES_HOST_PORT`, `MINIO_API_PORT`, `MINIO_CONSOLE_PORT`,
+`AIRFLOW_HOST_PORT`, `METABASE_HOST_PORT`.
+
 ### 3. Generate & Upload Sample Data
 
 ```bash

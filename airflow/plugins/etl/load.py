@@ -8,6 +8,7 @@ Includes:
 - Structured logging with row counts and timing
 - LoadError for classified failures
 """
+import logging
 import time
 import pandas as pd
 from psycopg2.extras import execute_values
@@ -26,7 +27,7 @@ BATCH_SIZE = 1000  # rows per batch for large DataFrames
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=60),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def upsert_orders(df: pd.DataFrame, source_file: str) -> int:
@@ -140,7 +141,7 @@ def upsert_orders(df: pd.DataFrame, source_file: str) -> int:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=60),
-    before_sleep=before_sleep_log(logger, "WARNING"),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 def refresh_summary(dates: list, regions: list, file_key: str = ""):
@@ -161,11 +162,11 @@ def refresh_summary(dates: list, regions: list, file_key: str = ""):
 
     try:
         cur = conn.cursor()
-        date_strs = [str(d) for d in dates]
+        date_values = [pd.to_datetime(d).date() for d in dates]
 
         logger.info(
             "Refreshing summary: %d date(s) × %d region(s)",
-            len(date_strs), len(regions),
+            len(date_values), len(regions),
             extra={"task_name": "refresh_summary", "file_key": file_key},
         )
 
@@ -173,9 +174,9 @@ def refresh_summary(dates: list, regions: list, file_key: str = ""):
         cur.execute(
             """
             DELETE FROM curated.summary_daily_sales
-            WHERE summary_date = ANY(%s) AND region = ANY(%s)
+            WHERE summary_date = ANY(%s::date[]) AND region = ANY(%s)
             """,
-            (date_strs, regions),
+            (date_values, regions),
         )
         deleted = cur.rowcount
         logger.info(
@@ -199,10 +200,10 @@ def refresh_summary(dates: list, regions: list, file_key: str = ""):
                 ROUND(AVG(total_amount)::numeric, 2),
                 NOW()
             FROM curated.fact_orders
-            WHERE order_date = ANY(%s) AND region = ANY(%s)
+            WHERE order_date = ANY(%s::date[]) AND region = ANY(%s)
             GROUP BY order_date, region
             """,
-            (date_strs, regions),
+            (date_values, regions),
         )
         inserted = cur.rowcount
 
