@@ -25,7 +25,7 @@ def _init_pool():
     port = int(os.getenv("PG_PORT", "5432"))
     dbname = os.getenv("PG_DATABASE", "dataplatform")
     user = os.getenv("PG_USER_ETL", "etl_writer")
-    password = os.getenv("PG_PASSWORD_ETL", "changeme")
+    password = os.getenv("PG_PASSWORD_ETL") or os.getenv("ETL_WRITER_PASSWORD", "changeme")
 
     logger.info(
         "Initializing PG connection pool: %s@%s:%d/%s (min=%d, max=%d)",

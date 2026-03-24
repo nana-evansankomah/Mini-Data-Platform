@@ -41,11 +41,14 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      ETL_WRITER_PASSWORD: ${ETL_WRITER_PASSWORD:?Set ETL_WRITER_PASSWORD in .env}
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD:?Set BI_READER_PASSWORD in .env}
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./db/init_roles.sh:/docker-entrypoint-initdb.d/02_init_roles.sh
       - ./db/init_airflow_db.sql:/docker-entrypoint-initdb.d/00_airflow.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?Set POSTGRES_USER in .env}" ]

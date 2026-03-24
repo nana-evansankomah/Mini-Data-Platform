@@ -56,38 +56,3 @@ CREATE TABLE IF NOT EXISTS audit.etl_audit_runs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_status  ON audit.etl_audit_runs (status);
 CREATE INDEX IF NOT EXISTS idx_audit_started ON audit.etl_audit_runs (started_at);
-
--- ============================================================
--- ROLES
--- ============================================================
-DO $$
-BEGIN
-    -- etl_writer role (used by Airflow)
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'etl_writer') THEN
-        CREATE ROLE etl_writer WITH LOGIN PASSWORD 'changeme';
-    END IF;
-
-    -- bi_reader role (used by Metabase)
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'bi_reader') THEN
-        CREATE ROLE bi_reader WITH LOGIN PASSWORD 'changeme';
-    END IF;
-END
-$$;
-
--- Grants for etl_writer
-GRANT USAGE, CREATE ON SCHEMA curated TO etl_writer;
-GRANT USAGE, CREATE ON SCHEMA audit   TO etl_writer;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA curated TO etl_writer;
-GRANT SELECT, INSERT, UPDATE         ON ALL TABLES IN SCHEMA audit   TO etl_writer;
-
--- Grants for bi_reader
-GRANT USAGE  ON SCHEMA curated TO bi_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA curated TO bi_reader;
-GRANT USAGE  ON SCHEMA audit   TO bi_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA audit   TO bi_reader;
-
--- Default privileges for future tables
-ALTER DEFAULT PRIVILEGES IN SCHEMA curated GRANT SELECT ON TABLES TO bi_reader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA curated GRANT ALL    ON TABLES TO etl_writer;
-ALTER DEFAULT PRIVILEGES IN SCHEMA audit   GRANT SELECT ON TABLES TO bi_reader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA audit   GRANT SELECT, INSERT, UPDATE ON TABLES TO etl_writer;

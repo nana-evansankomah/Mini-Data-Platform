@@ -23,19 +23,56 @@ from minio import Minio
 from datetime import date, timedelta
 
 
+def _load_local_env() -> dict[str, str]:
+    """Load simple KEY=VALUE pairs from a local .env file when present."""
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    env_path = os.path.join(repo_root, ".env")
+    if not os.path.exists(env_path):
+        return {}
+
+    env = {}
+    with open(env_path, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            env[key.strip()] = value.strip()
+    return env
+
+
+LOCAL_ENV = _load_local_env()
+
+
 # ── Configuration ─────────────────────────────────────────────
 AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://localhost:8080")
 AIRFLOW_USER = os.getenv("AIRFLOW_USER", "admin")
-AIRFLOW_PASS = os.getenv("AIRFLOW_PASS", "changeme")
-
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT_EXT", "localhost:9000")
-MINIO_ACCESS = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET = os.getenv("MINIO_SECRET_KEY", "changeme123")
-
-PG_DSN = os.getenv(
-    "PG_DSN",
-    "postgresql://etl_writer:changeme@localhost:5432/dataplatform",
+AIRFLOW_PASS = os.getenv(
+    "AIRFLOW_PASS",
+    LOCAL_ENV.get("AIRFLOW_ADMIN_PASSWORD", "changeme"),
 )
+
+MINIO_ENDPOINT = os.getenv(
+    "MINIO_ENDPOINT_EXT",
+    f"localhost:{LOCAL_ENV.get('MINIO_API_PORT', '9000')}",
+)
+MINIO_ACCESS = os.getenv(
+    "MINIO_ACCESS_KEY",
+    LOCAL_ENV.get("MINIO_ROOT_USER", "minioadmin"),
+)
+MINIO_SECRET = os.getenv(
+    "MINIO_SECRET_KEY",
+    LOCAL_ENV.get("MINIO_ROOT_PASSWORD", "changeme123"),
+)
+
+_pg_dsn_default = (
+    "postgresql://etl_writer:"
+    f"{LOCAL_ENV.get('ETL_WRITER_PASSWORD', 'changeme')}"
+    "@localhost:"
+    f"{LOCAL_ENV.get('POSTGRES_HOST_PORT', '5432')}/"
+    f"{LOCAL_ENV.get('POSTGRES_DB', 'dataplatform')}"
+)
+PG_DSN = os.getenv("PG_DSN", _pg_dsn_default)
 
 VALID_ROWS = 5
 INVALID_ROWS = 2
