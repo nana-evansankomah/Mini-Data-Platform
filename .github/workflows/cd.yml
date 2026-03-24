@@ -23,14 +23,14 @@ jobs:
         run: |
           echo "POSTGRES_DB=dataplatform"                                     > .env
           echo "POSTGRES_USER=${{ secrets.POSTGRES_USER || 'admin' }}"                  >> .env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD || 'changeme' }}"          >> .env
-          echo "ETL_WRITER_PASSWORD=${{ secrets.ETL_WRITER_PASSWORD || 'changeme' }}"      >> .env
-          echo "BI_READER_PASSWORD=${{ secrets.BI_READER_PASSWORD || 'changeme' }}"        >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD || 'password123' }}"       >> .env
+          echo "ETL_WRITER_PASSWORD=${{ secrets.ETL_WRITER_PASSWORD || 'password123' }}"   >> .env
+          echo "BI_READER_PASSWORD=${{ secrets.BI_READER_PASSWORD || 'password123' }}"     >> .env
           echo "MINIO_ROOT_USER=${{ secrets.MINIO_ROOT_USER || 'minioadmin' }}"             >> .env
-          echo "MINIO_ROOT_PASSWORD=${{ secrets.MINIO_ROOT_PASSWORD || 'changeme123' }}"     >> .env
+          echo "MINIO_ROOT_PASSWORD=${{ secrets.MINIO_ROOT_PASSWORD || 'password123' }}"   >> .env
           echo "AIRFLOW__CORE__FERNET_KEY=${{ secrets.FERNET_KEY || 'your-fernet-key-here' }}"        >> .env
           echo "AIRFLOW__WEBSERVER__SECRET_KEY=${{ secrets.WEBSERVER_SECRET || 'your-secret-key-here' }}" >> .env
-          echo "AIRFLOW_ADMIN_PASSWORD=${{ secrets.AIRFLOW_ADMIN_PASSWORD || 'changeme' }}" >> .env
+          echo "AIRFLOW_ADMIN_PASSWORD=${{ secrets.AIRFLOW_ADMIN_PASSWORD || 'password123' }}" >> .env
 
       - name: Deploy containers
         run: |

@@ -33,6 +33,7 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
+      - run: cp .env.example .env
       - run: docker compose build --no-cache
 
   integration-test:
@@ -41,6 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
+      - name: Export .env
+        run: grep -v '^#' .env | grep -v '^$' >> "$GITHUB_ENV"
       - run: docker compose up -d
       - name: Wait for services
         run: sleep 60
@@ -68,13 +71,15 @@ jobs:
           python-version: "3.11"
       - run: pip install -r airflow/requirements.txt requests
       - run: cp .env.example .env
+      - name: Export .env
+        run: grep -v '^#' .env | grep -v '^$' >> "$GITHUB_ENV"
       - run: docker compose up -d
       - name: Wait for services
         run: sleep 90
       - name: Generate and upload test data
         run: |
           python scripts/generate_sample_data.py --rows 20 --output /tmp/test_sales.csv
-          python scripts/upload_to_minio.py --file /tmp/test_sales.csv
+          python scripts/upload_to_minio.py --file /tmp/test_sales.csv --endpoint "localhost:${MINIO_API_PORT}" --access-key "${MINIO_ROOT_USER}" --secret-key "${MINIO_ROOT_PASSWORD}"
       - name: Trigger and wait for DAG
         run: |
           python -c "
@@ -83,7 +88,10 @@ jobs:
           import requests
 
           airflow_url = os.getenv('AIRFLOW_URL', 'http://localhost:8080')
-          auth = (os.getenv('AIRFLOW_USER', 'admin'), os.getenv('AIRFLOW_PASS', 'changeme'))
+          auth = (
+              os.getenv('AIRFLOW_USER', 'admin'),
+              os.getenv('AIRFLOW_PASS') or os.getenv('AIRFLOW_ADMIN_PASSWORD', 'password123')
+          )
           dag_id = 'sales_etl'
 
           for _ in range(30):
@@ -128,8 +136,14 @@ jobs:
       - name: Validate data flow
         run: |
           python -c "
+          import os
           import psycopg2
-          conn = psycopg2.connect('postgresql://etl_writer:changeme@localhost:5432/dataplatform')
+          dsn = 'postgresql://etl_writer:{password}@localhost:{port}/{database}'.format(
+              password=os.getenv('ETL_WRITER_PASSWORD', 'password123'),
+              port=os.getenv('POSTGRES_HOST_PORT', '5432'),
+              database=os.getenv('POSTGRES_DB', 'dataplatform'),
+          )
+          conn = psycopg2.connect(dsn)
           cur = conn.cursor()
           cur.execute('SELECT COUNT(*) FROM curated.fact_orders')
           count = cur.fetchone()[0]
